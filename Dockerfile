@@ -2,12 +2,8 @@ FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND noninteractive
 
-# Update OS packages
 RUN apt-get update -y && apt-get install -y \
     build-essential
-
-# Don't show git message about not existing parent branch
-# RUN git config --global advice.detachedHead false
 
 RUN mkdir -p /tmp/diogen
 
