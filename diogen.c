@@ -5,34 +5,58 @@
 #include "ascii_logo.c"
 
 #define DEFAULT_STRING_LENGTH 50
-#define OS_SIZE_STRUCT 3
-#define PHP_SIZE_STRUCT 1
+#define OS_SIZE_STRUCT 2
+#define PHP_SIZE_STRUCT 2
 #define PHP_FRAMEWORK_SIZE_STRUCT 2
 #define SERVER_SIZE_STRUCT 2
 #define DATABASE_SIZE_STRUCT 1
+#define CACHE_SIZE_STRUCT 2
+#define ONLY_PHP_STRUCT 2
+#define XDEBUG_SIZE_STRUCT 2
+#define WITH_SERVER_STRUCT 2
+#define WITH_DB_STRUCT 2
 #define ROOT_DIRECTORY_NAME "./docker"
 #define DEFAULT_DIRECTORY_PERM 0777
 #define PHP_DIRECTORY_NAME  "./docker/php"
 #define PHP_DOCKERFILE "./docker/php/Dockerfile"
 
+
 struct Map {
     int index;
     char key[50];
     char value[50];
-} OS[OS_SIZE_STRUCT] = {
-    {.index = 1, .key = "Debian 10", .value = "debian:buster-slim"},
+} ONLY_PHP[ONLY_PHP_STRUCT] = {
+    {.index = 1, .key = "yes", .value = "yes"},
+    {.index = 2, .key = "no", .value = "no"},
+}, WITH_SERVER[WITH_SERVER_STRUCT] = {
+    {.index = 1, .key = "yes", .value = "yes"},
+    {.index = 2, .key = "no", .value = "no"},
+}, WITH_DB[WITH_DB_STRUCT] = {
+    {.index = 1, .key = "yes", .value = "yes"},
+    {.index = 2, .key = "no", .value = "no"},
+}, OS[OS_SIZE_STRUCT] = {
+    {.index = 1, .key = "Debian 12 (latest)", .value = "debian:bookworm-slim"},
     {.index = 2, .key = "Debian 11", .value = "debian:bullseye-slim"},
-    {.index = 3, .key = "Debian 12", .value = "debian:bookworm-slim"},
 }, PHP[PHP_SIZE_STRUCT] = {
     {.index = 1, .key = "8.3", .value = "php-8.3.7"},
+    {.index = 2, .key = "8.2", .value = "php-8.2.19"},
+}, XDEBUG[XDEBUG_SIZE_STRUCT] = {
+    {.index = 1, .key = "yes", .value = "yes"},
+    {.index = 2, .key = "no", .value = "no"},
 }, SERVER[SERVER_SIZE_STRUCT] = {
-    {.index = 1, .key = "nginx", .value = "php-8.3.7"},
-    {.index = 2, .key = "nginx unit", .value = "php-8.3.7"},
+    {.index = 1, .key = "nginx (with php-fpm)", .value = "php-8.3.7"},
+    {.index = 2, .key = "nginx unit (with php-embed)", .value = "php-8.3.7"},
 }, FRAMEWORK[PHP_FRAMEWORK_SIZE_STRUCT] = {
     {.index = 1, .key = "Laravel 11 (require php 8.2 or 8.3)", .value = "laravel/laravel"},
     {.index = 2, .key = "Without framework", .value = "no"},
 }, DATABASE[DATABASE_SIZE_STRUCT] = {
     {.index = 1, .key = "MySQL 8.4", .value = "laravel/laravel"},
+}, CACHE[CACHE_SIZE_STRUCT] = {
+    {.index = 1, .key = "Redis", .value = "laravel/laravel"},
+    {.index = 2, .key = "Memcached", .value = "laravel/laravel"},
+}, QUEUE[CACHE_SIZE_STRUCT] = {
+    {.index = 1, .key = "RabbitMQ", .value = "laravel/laravel"},
+    {.index = 2, .key = "Kafka", .value = "laravel/laravel"},
 };
 
 void print_break_line(int length, char divider);
@@ -41,7 +65,7 @@ char *question(char string[], int length, struct Map *map);
 int make_root_directory();
 int make_php_directory();
 int make_php_dockerfile();
-int build_php_dockerfile(char* os, char* php);
+int build_php_dockerfile(char* os, char* php, int with_xdebug);
 void append_os(FILE *file, char* os);
 void append_disable_interaction(FILE *file);
 int install_packages(FILE *file);
@@ -54,31 +78,74 @@ int add_user(FILE *file);
 int make_composer_directory(FILE *file);
 int set_directories_owner(FILE *file);
 int change_user(FILE *file);
+int php_config(FILE *file);
+int xdebug_config();
+int copy_xdebug_config(FILE *file);
+int install_xdebug(FILE *file);
 
 int main(int argc, char *argv[])
 {   
+    char only_php[DEFAULT_STRING_LENGTH];
+    char with_server[DEFAULT_STRING_LENGTH];
+    char with_db[DEFAULT_STRING_LENGTH];
     char os[DEFAULT_STRING_LENGTH];
     char php[DEFAULT_STRING_LENGTH];
+    char xdebug[DEFAULT_STRING_LENGTH];
     char framework[DEFAULT_STRING_LENGTH];
     char database[DEFAULT_STRING_LENGTH];
+    char server[DEFAULT_STRING_LENGTH];
 
     welcome_message();
     print_break_line(50, '=');
-    strcpy(os, question("What OS you want to use", OS_SIZE_STRUCT, OS));
-    strcpy(php, question("What PHP version you want to use", PHP_SIZE_STRUCT, PHP));
-    strcpy(framework, question("What PHP framework you want to install", PHP_FRAMEWORK_SIZE_STRUCT, FRAMEWORK));
-    strcpy(database, question("What database you want to install", DATABASE_SIZE_STRUCT, DATABASE));
+    strcpy(only_php, question("Do you want install only PHP?", ONLY_PHP_STRUCT, ONLY_PHP));
+    strcpy(os, question("What a OS you want to use?", OS_SIZE_STRUCT, OS));
+    strcpy(php, question("What a PHP version you want to use?", PHP_SIZE_STRUCT, PHP));
+    strcpy(xdebug, question("Do you want install XDEBUG for PHP?", XDEBUG_SIZE_STRUCT, XDEBUG));
 
-    make_root_directory();
-    make_php_directory();
-    make_php_dockerfile();
-    build_php_dockerfile(os, php);
+    if (strcmp(only_php, "yes") == 0) {
+
+        if (strcmp(xdebug, "yes") == 0) {
+            build_php_dockerfile(os, php, 1);    
+        } else {
+            build_php_dockerfile(os, php, 0);
+        }
+        
+        printf("Dockerfile was generated in docker/php directory\n\n");
+        return 0;
+    }
+
+    strcpy(with_server, question("Do you want install web server?", WITH_SERVER_STRUCT, WITH_SERVER));
+
+    if (strcmp(with_server, "yes") == 0) {
+        strcpy(server, question("What a server you want to install?", SERVER_SIZE_STRUCT, SERVER));
+        build_server_dockerfile(os, php);
+        
+        printf("Dockerfile was generated in docker/server directory\n\n");
+    }
+
+    strcpy(with_db, question("Do you want install web server?", WITH_DB_STRUCT, WITH_DB));
+
+    if (strcmp(with_db, "yes") == 0) {
+        strcpy(database, question("What a database you want to install?", DATABASE_SIZE_STRUCT, DATABASE));
+        build_database_dockerfile(os);
+        
+        printf("Dockerfile was generated in docker/database directory\n\n");
+    }
+
+    strcpy(framework, question("What a PHP framework you want to install?", PHP_FRAMEWORK_SIZE_STRUCT, FRAMEWORK));
+    
+
+    
 
     return 0;
 }
 
-int build_php_dockerfile(char* os, char* php)
+int build_php_dockerfile(char* os, char* php, int with_xdebug)
 {
+    make_root_directory();
+    make_php_directory();
+    make_php_dockerfile();
+
     FILE* file = fopen(PHP_DOCKERFILE, "a");
 
     if (file == NULL) {
@@ -93,6 +160,14 @@ int build_php_dockerfile(char* os, char* php)
     make_subdirectories(file);
     clone_php_sources(file, php);
     install_php(file);
+    php_config(file);
+
+    if (with_xdebug == 1) {
+        install_xdebug(file);
+        xdebug_config();
+        copy_xdebug_config(file);
+    }
+
     install_composer(file);
     add_user(file);
     make_composer_directory(file);
@@ -110,7 +185,7 @@ int change_user(FILE *file)
 
 int set_directories_owner(FILE *file)
 {
-    char buffer[100] = "RUN chown -R sammy:sammy /home/samme && chown -R sammy:sammy /var/www\n\n";
+    char buffer[100] = "RUN chown -R sammy:sammy /home/sammy && chown -R sammy:sammy /var/www\n\n";
     fprintf(file, "%s", buffer);
 }
 
@@ -134,9 +209,41 @@ int install_composer(FILE *file)
 
 int install_php(FILE *file)
 {
-    char buffer[1024] = "RUN /tmp/php/buildconf --force \\\n";
-    strcat(buffer, "&& /tmp/php/&& ./configure --prefix=/opt/php --enable-embed=shared --disable-short-tags --with-openssl --with-external-pcre --without-sqlite3 --without-pdo-sqlite --with-zlib --enable-bcmath --with-curl --enable-exif --enable-gd --with-jpeg --with-freetype --enable-intl --enable-mbstring --enable-pcntl --with-pdo-pgsql --with-pgsql --with-libedit --with-readline --enable-soap --enable-sockets --with-sodium --with-password-argon2 --enable-sysvmsg --enable-sysvsem --enable-sysvshm --with-zip --with-gnu-ld=yes --enable-zts \\\n");
-    strcat(buffer, "&& make && make install && ln -s /opt/php/bin/php /usr/bin\n\n");
+    char workdir[100] = "WORKDIR /tmp/php\n";
+    char buffer[1024] = "RUN ./buildconf --force \\\n";
+    strcat(buffer, "&& ./configure --prefix=/opt/php --with-config-file-scan-dir=/opt/php/lib --enable-embed=shared --disable-short-tags --with-openssl --with-external-pcre --without-sqlite3 --without-pdo-sqlite --with-zlib --enable-bcmath --with-curl --enable-exif --enable-gd --with-jpeg --with-freetype --enable-intl --enable-mbstring --enable-pcntl --with-pdo-pgsql --with-pgsql --with-libedit --with-readline --enable-soap --enable-sockets --with-sodium --with-password-argon2 --enable-sysvmsg --enable-sysvsem --enable-sysvshm --with-zip --with-gnu-ld=yes --enable-zts \\\n");
+    strcat(buffer, "&& make && make install && ln -s /opt/php/bin/php /usr/bin && ln -s /opt/php/bin/phpize /usr/bin && ln -s /opt/php/bin/php-config /usr/bin \n\n");
+    fprintf(file, "%s", workdir);
+    fprintf(file, "%s", buffer);
+}
+
+int php_config(FILE *file)
+{
+    char buffer[100] = "RUN cp /tmp/php/php.ini-development /opt/php/lib/php.ini\n";
+    fprintf(file, "%s", buffer);
+}
+
+int copy_xdebug_config(FILE *file)
+{
+    char buffer[100] = "COPY ./99-xdebug.ini /opt/php/lib/99-xdebug.ini\n";
+    fprintf(file, "%s", buffer);
+}
+
+int xdebug_config()
+{
+    char path[100];
+    strcpy(path, PHP_DIRECTORY_NAME);
+    strcat(path, "/99-xdebug.ini");
+    FILE* file = fopen(path, "w");
+    fprintf(file, "%s", "zend_extension=xdebug\n[xdebug]\nxdebug.mode=develop,debug\nxdebug.client_host=host.docker.internal\nxdebug.start_with_request=yes\n");
+    return fclose(file);
+}
+
+int install_xdebug(FILE *file)
+{
+    char buffer[1024] = "RUN git clone --depth=1 https://github.com/xdebug/xdebug.git /tmp/xdebug\n";
+    strcat(buffer, "WORKDIR /tmp/xdebug\n");
+    strcat(buffer, "RUN phpize && ./configure --enable-xdebug && make && make install\n");
     fprintf(file, "%s", buffer);
 }
 
@@ -150,7 +257,7 @@ int clone_php_sources(FILE *file, char* php)
 
 int make_subdirectories(FILE *file)
 {
-    fprintf(file, "%s", "RUN mkdir -p /tmp/php /opt/php /var/www\n");
+    fprintf(file, "%s", "RUN mkdir -p /tmp/php /tmp/xdebug /opt/php /var/www\n");
 }
 
 int detach_git_parent_branch(FILE *file)
